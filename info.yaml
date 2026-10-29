@@ -1,43 +1,44 @@
-
 # Tiny Tapeout project information
 project:
-  title: "ReCORDIC: Reconfigurable CORDIC Accelerator"
+  title: "ReCORDIC: Reconfigurable CORDIC + FIR/IIR DSP"
   author: "Navya Singh"
   discord: ""
-  description: "A serially interfaced iterative CORDIC accelerator supporting vector rotation, magnitude and phase calculation, selectable iteration count, and optional shift-add gain compensation."
+  description: "A bit-serial CORDIC accelerator (vector rotation, magnitude and phase, selectable 5-12 iterations, optional shift-add gain compensation) sharing pins with a configurable signed 8-bit FIR/IIR filter (low-pass, IIR low-pass, high-pass, bypass). uio[0] selects the engine."
   language: "Verilog"
   clock_hz: 10000000
 
   tiles: "1x1"
-  top_module: "tt_um_cordic_iter"
+  top_module: "tt_um_cordic_dsp"
 
   source_files:
-    - "project.v"
+    - "cordic_serial.v"
+    - "dsp_fir_iir.v"
+    - "tt_um_cordic_dsp.v"
 
-# Pinout
+# Pinout (pins are shared: the meaning depends on uio[0] = SEL)
 pinout:
   # Inputs
-  ui[0]: "SDI"
-  ui[1]: "SH_EN"
-  ui[2]: "START"
-  ui[3]: "MODE"
-  ui[4]: "GAIN_COMP"
-  ui[5]: "NSEL0"
-  ui[6]: "NSEL1"
-  ui[7]: "NSEL2"
+  ui[0]: "SDI / DSP_IN0"
+  ui[1]: "SH_EN / DSP_IN1"
+  ui[2]: "START / DSP_IN2"
+  ui[3]: "MODE / DSP_IN3"
+  ui[4]: "GAIN_COMP / DSP_IN4"
+  ui[5]: "NSEL0 / DSP_IN5"
+  ui[6]: "NSEL1 / DSP_IN6"
+  ui[7]: "NSEL2 / DSP_IN7"
 
   # Outputs
-  uo[0]: "SDO"
-  uo[1]: "BUSY"
-  uo[2]: "DONE"
-  uo[3]: "UNUSED"
-  uo[4]: "ITER_COUNT0"
-  uo[5]: "ITER_COUNT1"
-  uo[6]: "ITER_COUNT2"
-  uo[7]: "ITER_COUNT3"
+  uo[0]: "SDO / DSP_OUT0"
+  uo[1]: "BUSY / DSP_OUT1"
+  uo[2]: "DONE / DSP_OUT2"
+  uo[3]: "0 / DSP_OUT3"
+  uo[4]: "ITER0 / DSP_OUT4"
+  uo[5]: "ITER1 / DSP_OUT5"
+  uo[6]: "ITER2 / DSP_OUT6"
+  uo[7]: "ITER3 / DSP_OUT7"
 
   # Bidirectional pins
-  uio[0]: ""
+  uio[0]: "SEL (0 = CORDIC, 1 = DSP)"
   uio[1]: ""
   uio[2]: ""
   uio[3]: ""
