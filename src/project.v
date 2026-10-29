@@ -1,51 +1,41 @@
 `default_nettype none
 
-module tt_um_cordic_iter (
-    input  wire [7:0] ui_in,
-    output wire [7:0] uo_out,
-    input  wire [7:0] uio_in,
-    output wire [7:0] uio_out,
-    output wire [7:0] uio_oe,
-    input  wire       ena,
+module cordic_serial (
     input  wire       clk,
-    input  wire       rst_n
+    input  wire       rst_n,
+    input  wire [7:0] ui,
+    output wire [7:0] uo
 );
 
   localparam [1:0] S_RDY = 2'd0, S_PRE = 2'd1, S_ITER = 2'd2, S_COMP = 2'd3;
-  reg signed [15:0] x, y;
-  reg        [15:0] z;
-  reg        [3:0]  i;
-  reg        [1:0]  state;
-  reg               mode_q, comp_q, done_q, start_q;
-  reg        [3:0]  last_q;
 
-  wire sdi    = ui_in[0];
-  wire sh_en  = ui_in[1];
-  wire start  = ui_in[2];
-  wire start_pe = start & ~start_q;
+  reg [15:0] x, y, z;          
+  reg [1:0]  state;
+  reg [3:0]  k;                
+  reg [3:0]  i;                
+  reg [3:0]  last_q;           
+  reg        mode_q, comp_q, done_q, start_q, flip_q;
+  reg        d_q, sgx_q, sgy_q;   
+  reg        cx, cy, cz;          
 
+  wire sdi      = ui[0];
+  wire sh_en    = ui[1];
+  wire start_pe = ui[2] & ~start_q;
+
+  wire busy    = (state != S_RDY);
   wire in_pre  = (state == S_PRE);
+  wire in_iter = (state == S_ITER);
   wire in_comp = (state == S_COMP);
+  wire first   = (k == 4'd0);
+  wire last    = (k == 4'd15);
 
-  // ------------------------------------------------------- constant tables
-  // atan(2^-i) scaled so that pi = 2^15
-  reg [15:0] alpha;
-  always @* begin
-    case (i)
-      4'd0:  alpha = 16'd8192;
-      4'd1:  alpha = 16'd4836;
-      4'd2:  alpha = 16'd2555;
-      4'd3:  alpha = 16'd1297;
-      4'd4:  alpha = 16'd651;
-      4'd5:  alpha = 16'd326;
-      4'd6:  alpha = 16'd163;
-      4'd7:  alpha = 16'd81;
-      4'd8:  alpha = 16'd41;
-      4'd9:  alpha = 16'd20;
-      4'd10: alpha = 16'd10;
-      default: alpha = 16'd5;
-    endcase
-  end
+
+  localparam [12*14-1:0] ALPHA_ROM = {
+      14'd5, 14'd10, 14'd20, 14'd41, 14'd81, 14'd163,
+      14'd326, 14'd651, 14'd1297, 14'd2555, 14'd4836, 14'd8192};
+  wire [13:0] alpha14   = (i < 4'd12) ? ALPHA_ROM[i*14 +: 14] : 14'd5;
+  wire        alpha_bit = (k < 4'd14) ? alpha14[k] : 1'b0;
+
 
   reg       c_sub;
   reg [3:0] c_k;
@@ -59,76 +49,91 @@ module tt_um_cordic_iter (
     endcase
   end
 
+  wire [3:0] sh  = in_comp ? c_k : i;
+  wire [4:0] ki  = {1'b0, k} + {1'b0, sh};
+  wire       ext = ki[4];                       
+  wire xtap = ext ? sgx_q : x[sh];
+  wire ytap = ext ? sgy_q : y[sh];
 
-  wire [3:0] sh = in_comp ? c_k : i;
-  wire signed [15:0] xsh = x >>> sh;
-  wire signed [15:0] ysh = y >>> sh;
+  wire sub_x = in_pre ? flip_q : (in_comp ? c_sub : d_q);
+  wire sub_y = in_pre ? flip_q : (in_comp ? c_sub : ~d_q);
+  wire sub_z = d_q;
+
+  wire a_x = x[0] & ~(in_pre & flip_q);
+  wire a_y = y[0] & ~(in_pre & flip_q);
+  wire b_x = in_pre ? (x[0] & flip_q) : (in_comp ? xtap : ytap);
+  wire b_y = in_pre ? (y[0] & flip_q) : (in_comp ? ytap : xtap);
+
+  wire bb_x  = b_x ^ sub_x;
+  wire bb_y  = b_y ^ sub_y;
+  wire bb_z  = alpha_bit ^ sub_z;
+  wire ci_x  = first ? sub_x : cx;
+  wire ci_y  = first ? sub_y : cy;
+  wire ci_z  = first ? sub_z : cz;
+
+  wire s_x   = a_x ^ bb_x ^ ci_x;
+  wire s_y   = a_y ^ bb_y ^ ci_y;
+  wire s_zi  = z[0] ^ bb_z ^ ci_z;
+  wire co_x  = (a_x & bb_x) | (a_x & ci_x) | (bb_x & ci_x);
+  wire co_y  = (a_y & bb_y) | (a_y & ci_y) | (bb_y & ci_y);
+  wire co_z  = (z[0] & bb_z) | (z[0] & ci_z) | (bb_z & ci_z);
 
 
-  wire d_pos = mode_q ? y[15] : ~z[15];
+  wire s_z   = in_iter ? s_zi : (in_pre ? (z[0] ^ (flip_q & last)) : z[0]);
 
-  wire flip  = mode_q ? x[15] : (z[15] ^ z[14]);
+  wire chain_sh = ~busy & sh_en & ~start_pe;
+  wire sh_any   = busy | chain_sh;
 
-  wire sub_x = in_pre ? 1'b1 : (in_comp ? c_sub : d_pos);
-  wire sub_y = in_pre ? 1'b1 : (in_comp ? c_sub : ~d_pos);
-  wire [15:0] ax = in_pre ? 16'd0 : x;
-  wire [15:0] ay = in_pre ? 16'd0 : y;
-  wire [15:0] bx = in_pre ? x : (in_comp ? xsh : ysh);
-  wire [15:0] by = in_pre ? y : (in_comp ? ysh : xsh);
-
-  wire [15:0] x_nx = ax + (bx ^ {16{sub_x}}) + {15'd0, sub_x};
-  wire [15:0] y_nx = ay + (by ^ {16{sub_y}}) + {15'd0, sub_y};
-  wire [15:0] z_nx = z  + (alpha ^ {16{d_pos}}) + {15'd0, d_pos};
-
-  wire at_last = (i == last_q);
-  wire comp_last = (i == 4'd4);
+  always @(posedge clk) begin
+    if (!rst_n) begin
+      x <= 16'd0; y <= 16'd0; z <= 16'd0;
+    end else if (sh_any) begin
+      x <= {busy ? s_x : y[0], x[15:1]};
+      y <= {busy ? s_y : z[0], y[15:1]};
+      z <= {busy ? s_z : sdi,  z[15:1]};
+    end
+  end
 
 
   always @(posedge clk) begin
     if (!rst_n) begin
-      x <= 16'sd0; y <= 16'sd0; z <= 16'd0;
-      i <= 4'd0; state <= S_RDY;
-      mode_q <= 1'b0; comp_q <= 1'b0; done_q <= 1'b0;
-      start_q <= 1'b0; last_q <= 4'd0;
+      state <= S_RDY; k <= 4'd0; i <= 4'd0; last_q <= 4'd0;
+      mode_q <= 1'b0; comp_q <= 1'b0; done_q <= 1'b0; start_q <= 1'b0; flip_q <= 1'b0;
+      d_q <= 1'b0; sgx_q <= 1'b0; sgy_q <= 1'b0; cx <= 1'b0; cy <= 1'b0; cz <= 1'b0;
     end else begin
-      start_q <= start;
+      start_q <= ui[2];
+      cx <= co_x; cy <= co_y; cz <= co_z;
+      if (busy) k <= k + 4'd1;
+
+      if (busy & last) begin                   
+        sgx_q <= s_x;
+        sgy_q <= s_y;
+        d_q   <= mode_q ? s_y : ~s_z;
+      end
+
       case (state)
-        S_RDY: begin
-          if (start_pe) begin
-            mode_q <= ui_in[3];
-            comp_q <= ui_in[4];
-            last_q <= {1'b0, ui_in[7:5]} + 4'd4;   // N-1
-            done_q <= 1'b0;
-            i      <= 4'd0;
-            state  <= S_PRE;
-          end else if (sh_en) begin
-            x <= {x[14:0], y[15]};
-            y <= {y[14:0], z[15]};
-            z <= {z[14:0], sdi};
-          end
+        S_RDY: if (start_pe) begin
+          mode_q <= ui[3];
+          comp_q <= ui[4];
+          last_q <= {1'b0, ui[7:5]} + 4'd4;
+          flip_q <= ui[3] ? x[15] : (z[15] ^ z[14]);
+          done_q <= 1'b0;
+          i      <= 4'd0;
+          state  <= S_PRE;
         end
-        S_PRE: begin
-          if (flip) begin
-            x <= x_nx;
-            y <= y_nx;
-            z <= {~z[15], z[14:0]};
-          end
+        S_PRE: if (last) begin
           state <= S_ITER;
+          i     <= 4'd0;
         end
-        S_ITER: begin
-          x <= x_nx;
-          y <= y_nx;
-          z <= z_nx;
-          if (at_last) begin
+        S_ITER: if (last) begin
+          if (i == last_q) begin
             i <= 4'd0;
             if (comp_q) state <= S_COMP;
             else begin state <= S_RDY; done_q <= 1'b1; end
           end else i <= i + 4'd1;
         end
-        S_COMP: begin
-          x <= x_nx;
-          y <= y_nx;
-          if (comp_last) begin
+        S_COMP: if (last) begin
+          if (i == 4'd4) begin
             i <= 4'd0; state <= S_RDY; done_q <= 1'b1;
           end else i <= i + 4'd1;
         end
@@ -136,12 +141,6 @@ module tt_um_cordic_iter (
     end
   end
 
-
-  wire busy = (state != S_RDY);
-  assign uo_out  = {i, 1'b0, done_q, busy, x[15]};
-  assign uio_out = 8'h00;
-  assign uio_oe  = 8'h00;
-
-  wire _unused = &{ena, uio_in, 1'b0};
+  assign uo = {i, 1'b0, done_q, busy, x[0]};
 
 endmodule
