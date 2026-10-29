@@ -1,4 +1,6 @@
-"""Bit-accurate golden model of tt_um_cordic_iter (src/project.v).
+"""Bit-accurate golden model of cordic_serial (src/cordic_serial.v).
+
+The bit-serial engine is arithmetically identical to the parallel one, so the same model applies.
 
 Every operation mirrors the RTL: 16-bit two's complement, arithmetic right
 shifts, simultaneous x/y update, same atan table and gain-compensation steps.
@@ -46,8 +48,9 @@ def cordic(x, y, z, mode, comp, nsel):
 
 
 def busy_cycles(comp, nsel):
-    """Clocks between start and done: 1 (PRE) + N (ITER) + 5 (COMP, optional)."""
-    return 1 + (5 + nsel) + (5 if comp else 0)
+    """Clocks between start and done for the bit-serial engine: 16 per pass.
+    passes = 1 (pre-rotation) + N (iterations) + 5 (gain steps, optional)."""
+    return 16 * (1 + (5 + nsel) + (5 if comp else 0))
 
 
 def to_q(v, frac=13):
