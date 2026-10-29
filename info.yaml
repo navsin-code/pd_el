@@ -11,9 +11,9 @@ project:
   top_module: "tt_um_cordic_dsp"
 
   source_files:
-    - "cordic_serial.v"
+    - "project.v"
     - "dsp_fir_iir.v"
-    - "tt_um_cordic_dsp.v"
+    - "tt_um_cordic_dsp"
 
 # Pinout (pins are shared: the meaning depends on uio[0] = SEL)
 pinout:
