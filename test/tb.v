@@ -1,13 +1,18 @@
 `default_nettype none
 `timescale 1ns / 1ps
-// Thin wrapper in the Tiny Tapeout template style: cocotb drives these regs.
+
+/* Testbench wrapper (Tiny Tapeout template style): instantiates the design and exposes
+   wires that cocotb (test.py) drives. Works for both RTL and gate-level simulation. */
 module tb ();
+
+  // Dump the signals to a VCD file. You can view it with gtkwave.
   initial begin
     $dumpfile("tb.vcd");
     $dumpvars(0, tb);
     #1;
   end
 
+  // Wire up the inputs and outputs:
   reg        clk;
   reg        rst_n;
   reg        ena;
@@ -16,15 +21,28 @@ module tb ();
   wire [7:0] uo_out;
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
+`ifdef GL_TEST
+  wire VPWR = 1'b1;
+  wire VGND = 1'b0;
+`endif
 
+  // Your top module:
   tt_um_cordic_dsp user_project (
-      .ui_in  (ui_in),
-      .uo_out (uo_out),
-      .uio_in (uio_in),
-      .uio_out(uio_out),
-      .uio_oe (uio_oe),
-      .ena    (ena),
-      .clk    (clk),
-      .rst_n  (rst_n)
+
+      // Power ports for the gate-level test:
+`ifdef GL_TEST
+      .VPWR(VPWR),
+      .VGND(VGND),
+`endif
+
+      .ui_in  (ui_in),    // Dedicated inputs
+      .uo_out (uo_out),   // Dedicated outputs
+      .uio_in (uio_in),   // IOs: Input path
+      .uio_out(uio_out),  // IOs: Output path
+      .uio_oe (uio_oe),   // IOs: Enable path (active high: 0=input, 1=output)
+      .ena    (ena),      // enable - goes high when design is selected
+      .clk    (clk),      // clock
+      .rst_n  (rst_n)     // not reset
   );
+
 endmodule
